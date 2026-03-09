@@ -4,6 +4,7 @@ from city_scrapers_core.items import Meeting
 from city_scrapers_core.spiders import CityScrapersSpider
 from datetime import time, datetime
 import scrapy
+from dateutil.parser import parse as dateparser
 
 
 class IlRegionalTransitSpider(CityScrapersSpider):
@@ -42,10 +43,17 @@ class IlRegionalTransitSpider(CityScrapersSpider):
             break
 
     def parse(self, response):
-        upcoming_meetings = response.meta.get("upcoming_section")
+        upcoming_section = response.meta.get("upcoming_section")
         meetings = response.css(".grid.grid-cols-1")[0]
-        all_meetings = [upcoming_meetings.getall(), meetings.get()]
-        print(f"MEETINGS: {all_meetings}")
+        upcoming_data = upcoming_section.css(".bg-rtadarkgray-500.w-full.grid.grid-cols-1.p-8.mb-12.border-t-4.border-rtayellow-500")
+        archived_data = meetings.css(".bg-rtadarkgray-500.border-t-4.border-rtayellow-500.p-6").getall()
+
+        upcoming_meetings = self._parse_upcoming_meetings(upcoming_data)
+        # archived_meetings = self._parse_archived_meetings(archived_data)
+
+        # meetings = upcoming_meetings + archived_meetings
+        print(upcoming_meetings)
+
         # for item in meetings:
         #     meeting = Meeting(
         #         title=self._parse_title(item),
@@ -64,6 +72,38 @@ class IlRegionalTransitSpider(CityScrapersSpider):
         #     meeting["id"] = self._get_id(meeting)
 
         yield None
+
+    def _parse_upcoming_meetings(self, upcoming_data):
+        meetings = []
+        location = {
+            "name": "",
+            "address": "",
+        }
+        for event in upcoming_data:
+            item_location = location.copy()
+            title = event.css(".font-heading.text-xl.md\\:text-2xl.text-white.mb-2::text").get()
+            start_time = event.css(".text-xl.text-rtayellow-500.mb-4::text").get()
+            location_string = event.css("p.text-white.text-sm.mb-4::text").getall()
+            links = []
+
+            item_location["name"] = location_string[0].strip() if len(location_string) > 0 else ""
+            item_location["address"] = location_string[1].strip() if len(location_string) > 1 else ""
+
+            item = {
+                "title": title,
+                "start_time": start_time,
+                "location": item_location,
+                "links": links,
+            }
+
+            meetings.append(item)
+
+        return meetings
+    
+    def _parse_archived_meetings(self, archived_data):
+        """Parse archived meetings from the response."""
+        # Implement parsing logic for archived meetings
+        return []
 
     def _parse_title(self, item):
         """Parse or generate meeting title."""
