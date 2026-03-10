@@ -46,14 +46,26 @@ class IlRegionalTransitSpider(CityScrapersSpider):
         upcoming_section = response.meta.get("upcoming_section")
         meetings = response.css(".grid.grid-cols-1")[0]
         upcoming_data = upcoming_section.css(".bg-rtadarkgray-500.w-full.grid.grid-cols-1.p-8.mb-12.border-t-4.border-rtayellow-500")
-        archived_data = meetings.css(".bg-rtadarkgray-500.border-t-4.border-rtayellow-500.p-6").getall()
+        archived_data = meetings.css(".bg-rtadarkgray-500.border-t-4.border-rtayellow-500.p-6")
 
         upcoming_meetings = self._parse_upcoming_meetings(upcoming_data)
-        # archived_meetings = self._parse_archived_meetings(archived_data)
+        archived_meetings = self._parse_archived_meetings(archived_data)
 
         # meetings = upcoming_meetings + archived_meetings
+        print(">>>>>>>>>>>>>")
+        print("START OF ARCHIVED MEETINGS >>>>>")
+        print(archived_meetings)
+        print("END OF ARCHIVED MEETINGS >>>>>")
         print(upcoming_meetings)
-
+        print("<<<<<<<<<<<<<")
+        
+        
+        # for item in upcoming_meetings:
+        #     print("########") 
+        #     start= self._parse_start(item)
+            #print(start)   
+            #print('#########')
+            
         # for item in meetings:
         #     meeting = Meeting(
         #         title=self._parse_title(item),
@@ -79,6 +91,7 @@ class IlRegionalTransitSpider(CityScrapersSpider):
             "name": "",
             "address": "",
         }
+
         for event in upcoming_data:
             item_location = location.copy()
             title = event.css(".font-heading.text-xl.md\\:text-2xl.text-white.mb-2::text").get()
@@ -101,9 +114,17 @@ class IlRegionalTransitSpider(CityScrapersSpider):
         return meetings
     
     def _parse_archived_meetings(self, archived_data):
-        """Parse archived meetings from the response."""
         # Implement parsing logic for archived meetings
-        return []
+        meetings=[]
+        for event in archived_data:
+            title= event.css(".text-base.text-rtayellow-500.mb-4::text").get()
+    
+        item={
+            "title": title,
+        }
+
+        meetings.append(item)
+        return meetings
 
     def _parse_title(self, item):
         """Parse or generate meeting title."""
@@ -119,8 +140,8 @@ class IlRegionalTransitSpider(CityScrapersSpider):
         return NOT_CLASSIFIED
 
     def _parse_start(self, item):
-        """Parse start datetime as a naive datetime object."""
-        return None
+        start=item.get("start_time").replace("Upcoming:", "").replace(": "," ").strip()
+        return dateparser(start)
 
     def _parse_end(self, item):
         """Parse end datetime as a naive datetime object. Added by pipeline if None"""
