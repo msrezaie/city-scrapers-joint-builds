@@ -1,5 +1,5 @@
 from urllib import response
-from city_scrapers_core.constants import NOT_CLASSIFIED
+from city_scrapers_core.constants import NOT_CLASSIFIED, BOARD, COMMITTEE
 from city_scrapers_core.items import Meeting
 from city_scrapers_core.spiders import CityScrapersSpider
 from datetime import time, datetime
@@ -21,7 +21,7 @@ class IlRegionalTransitSpider(CityScrapersSpider):
 
     _time_note = "Check the source link for the most up-to-date information on meeting times and locations." # noqa
 
-    _start_time = time(9, 0)
+    _start_time = "9:00 AM"
 
     custom_settings = {"ROBOTSTXT_OBEY": False}
 
@@ -40,7 +40,7 @@ class IlRegionalTransitSpider(CityScrapersSpider):
                 callback=self.parse,
                 meta={"upcoming_section": upcoming_section},
             )
-            break
+
 
     def parse(self, response):
         upcoming_section = response.meta.get("upcoming_section")
@@ -51,39 +51,26 @@ class IlRegionalTransitSpider(CityScrapersSpider):
         upcoming_meetings = self._parse_upcoming_meetings(upcoming_data)
         archived_meetings = self._parse_archived_meetings(archived_data)
 
-        # meetings = upcoming_meetings + archived_meetings
-        print(">>>>>>>>>>>>>")
-        print("START OF ARCHIVED MEETINGS >>>>>")
-        print(archived_meetings)
-        print("END OF ARCHIVED MEETINGS >>>>>")
-        print(upcoming_meetings)
-        print("<<<<<<<<<<<<<")
-        
-        
-        # for item in upcoming_meetings:
-        #     print("########") 
-        #     start= self._parse_start(item)
-            #print(start)   
-            #print('#########')
+        meetings = upcoming_meetings + archived_meetings
             
-        # for item in meetings:
-        #     meeting = Meeting(
-        #         title=self._parse_title(item),
-        #         description=self._parse_description(item),
-        #         classification=self._parse_classification(item),
-        #         start=self._parse_start(item),
-        #         end=self._parse_end(item),
-        #         all_day=self._parse_all_day(item),
-        #         time_notes=self._parse_time_notes(item),
-        #         location=self._parse_location(item),
-        #         links=self._parse_links(item),
-        #         source=self._parse_source(response),
-        #     )
+        for item in meetings:
+            meeting = Meeting(
+                title=item["title"],
+                description="",
+                classification=self._parse_classification(item),
+                start=item["start_time"],
+                end=None,
+                all_day=False,
+                time_notes=self._time_note,
+                location=item["location"],
+                links=item["links"],
+                source=response.url,
+            )
 
-        #     meeting["status"] = self._get_status(meeting)
-        #     meeting["id"] = self._get_id(meeting)
+            meeting["status"] = self._get_status(meeting)
+            meeting["id"] = self._get_id(meeting)
 
-        yield None
+            yield meeting
 
     def _parse_upcoming_meetings(self, upcoming_data):
         meetings = []
@@ -104,7 +91,7 @@ class IlRegionalTransitSpider(CityScrapersSpider):
 
             item = {
                 "title": title,
-                "start_time": start_time,
+                "start_time": self._parse_start(start_time),
                 "location": item_location,
                 "links": links,
             }
@@ -114,58 +101,46 @@ class IlRegionalTransitSpider(CityScrapersSpider):
         return meetings
     
     def _parse_archived_meetings(self, archived_data):
-        # Implement parsing logic for archived meetings
+        """Implement parsing logic for archived meetings."""
         meetings=[]
         for event in archived_data:
             title= event.css(".text-base.text-rtayellow-500.mb-4::text").get()
+            start_time = event.css(".text-lg.text-white.mb-4::text").get()
     
-        item={
-            "title": title,
-        }
+            item={
+                "title": title,
+                "start_time": dateparser(start_time + " " + self._start_time),
+                "location": self._location,
+                "links": self._parse_links(event),
+            }
 
-        meetings.append(item)
+            meetings.append(item)
         return meetings
-
-    def _parse_title(self, item):
-        """Parse or generate meeting title."""
-
-        return ""
-
-    def _parse_description(self, item):
-        """Parse or generate meeting description."""
-        return ""
-
+    
     def _parse_classification(self, item):
         """Parse or generate classification from allowed options."""
+        item["title"] = item["title"].lower()
+        if "board" in item["title"]:
+            return BOARD
+        if "committee" in item["title"]:
+            return COMMITTEE
         return NOT_CLASSIFIED
 
     def _parse_start(self, item):
-        start=item.get("start_time").replace("Upcoming:", "").replace(": "," ").strip()
+        start=item.replace("Upcoming:", "").replace(": "," ").strip()
         return dateparser(start)
-
-    def _parse_end(self, item):
-        """Parse end datetime as a naive datetime object. Added by pipeline if None"""
-        return None
-
-    def _parse_time_notes(self, item):
-        """Parse any additional notes on the timing of the meeting"""
-        return ""
-
-    def _parse_all_day(self, item):
-        """Parse or generate all-day status. Defaults to False."""
-        return False
-
-    def _parse_location(self, item):
-        """Parse or generate location."""
-        return {
-            "address": "",
-            "name": "",
-        }
 
     def _parse_links(self, item):
         """Parse or generate links."""
-        return [{"href": "", "title": ""}]
+        links = []
+        links_container = item.css(".grid.grid-cols-2 a::attr(href)").getall()
+        links_title = item.css(".grid.grid-cols-2 h2::text").getall()
 
-    def _parse_source(self, response):
-        """Parse or generate source."""
-        return response.url
+        for link, title in zip(links_container, links_title):
+            links.append(
+                {
+                    "title": title,
+                    "href": link,
+                }
+            )
+        return links
