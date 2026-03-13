@@ -1,9 +1,9 @@
-from urllib import response
-from city_scrapers_core.constants import NOT_CLASSIFIED, BOARD, COMMITTEE
+from datetime import datetime
+
+import scrapy
+from city_scrapers_core.constants import BOARD, COMMITTEE, NOT_CLASSIFIED
 from city_scrapers_core.items import Meeting
 from city_scrapers_core.spiders import CityScrapersSpider
-from datetime import time, datetime
-import scrapy
 from dateutil.parser import parse as dateparser
 
 
@@ -11,19 +11,25 @@ class IlRegionalTransitSpider(CityScrapersSpider):
     name = "il_regional_transit"
     agency = "Regional Transportation Authority"
     timezone = "America/Chicago"
-    all_meetings_url = "https://www.rtachicago.org/about-rta/boards-and-committees/meeting-materials?year={year}" # noqa
-    upcoming_meetings_url = "https://www.rtachicago.org/about-rta/boards-and-committees/meeting-materials" # noqa
+    all_meetings_url = "https://www.rtachicago.org/about-rta/boards-and-committees/meeting-materials?year={year}"  # noqa
+    upcoming_meetings_url = "https://www.rtachicago.org/about-rta/boards-and-committees/meeting-materials"  # noqa
 
     _location = {
         "name": "RTA Headquarters",
         "address": "175 W. Jackson Blvd., Chicago, IL 60604",
     }
 
-    _time_note = "Check the source link for the most up-to-date information on meeting times and locations." # noqa
+    _time_note = (
+        "Check the source page to confirm details on meeting time and location."
+    )
 
     _start_time = "9:00 AM"
 
     custom_settings = {"ROBOTSTXT_OBEY": False}
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._scraped_meetings = set()
 
     def start_requests(self):
         yield scrapy.Request(
@@ -32,7 +38,9 @@ class IlRegionalTransitSpider(CityScrapersSpider):
         )
 
     def _get_all_meetings(self, response):
-        upcoming_section = response.css(".bg-rtadarkgray-500.w-full.grid.grid-cols-1.p-8.mb-12.border-t-4.border-rtayellow-500") # noqa
+        upcoming_section = response.css(
+            ".bg-rtadarkgray-500.w-full.grid.grid-cols-1.p-8.mb-12.border-t-4.border-rtayellow-500"  # noqa
+        )
         current_year = datetime.now().year
         for year in range(current_year - 5, current_year + 1):
             yield scrapy.Request(
@@ -41,19 +49,27 @@ class IlRegionalTransitSpider(CityScrapersSpider):
                 meta={"upcoming_section": upcoming_section},
             )
 
-
     def parse(self, response):
         upcoming_section = response.meta.get("upcoming_section")
         meetings = response.css(".grid.grid-cols-1")[0]
-        upcoming_data = upcoming_section.css(".bg-rtadarkgray-500.w-full.grid.grid-cols-1.p-8.mb-12.border-t-4.border-rtayellow-500")
-        archived_data = meetings.css(".bg-rtadarkgray-500.border-t-4.border-rtayellow-500.p-6")
+        upcoming_data = upcoming_section.css(
+            ".bg-rtadarkgray-500.w-full.grid.grid-cols-1.p-8.mb-12.border-t-4.border-rtayellow-500"  # noqa
+        )
+        archived_data = meetings.css(
+            ".bg-rtadarkgray-500.border-t-4.border-rtayellow-500.p-6"
+        )
 
         upcoming_meetings = self._parse_upcoming_meetings(upcoming_data)
         archived_meetings = self._parse_archived_meetings(archived_data)
-
         meetings = upcoming_meetings + archived_meetings
-            
+
         for item in meetings:
+            temp_keys = str(item["start_time"]) + " " + item["title"]
+            if temp_keys in self._scraped_meetings:
+                continue
+            else:
+                self._scraped_meetings.add(temp_keys)
+
             meeting = Meeting(
                 title=item["title"],
                 description="",
@@ -81,13 +97,19 @@ class IlRegionalTransitSpider(CityScrapersSpider):
 
         for event in upcoming_data:
             item_location = location.copy()
-            title = event.css(".font-heading.text-xl.md\\:text-2xl.text-white.mb-2::text").get()
+            title = event.css(
+                ".font-heading.text-xl.md\\:text-2xl.text-white.mb-2::text"
+            ).get()
             start_time = event.css(".text-xl.text-rtayellow-500.mb-4::text").get()
             location_string = event.css("p.text-white.text-sm.mb-4::text").getall()
             links = []
 
-            item_location["name"] = location_string[0].strip() if len(location_string) > 0 else ""
-            item_location["address"] = location_string[1].strip() if len(location_string) > 1 else ""
+            item_location["name"] = (
+                location_string[0].strip() if len(location_string) > 0 else ""
+            )
+            item_location["address"] = (
+                location_string[1].strip() if len(location_string) > 1 else ""
+            )
 
             item = {
                 "title": title,
@@ -99,24 +121,28 @@ class IlRegionalTransitSpider(CityScrapersSpider):
             meetings.append(item)
 
         return meetings
-    
+
     def _parse_archived_meetings(self, archived_data):
         """Implement parsing logic for archived meetings."""
-        meetings=[]
+        meetings = []
         for event in archived_data:
-            title= event.css(".text-base.text-rtayellow-500.mb-4::text").get()
+            title = event.css(".text-base.text-rtayellow-500.mb-4::text").get()
             start_time = event.css(".text-lg.text-white.mb-4::text").get()
-    
-            item={
+
+            item = {
                 "title": title,
-                "start_time": dateparser(start_time + " " + self._start_time),
+                "start_time": dateparser(
+                    f"{start_time} {self._start_time}"
+                    if title == "Board Meeting"
+                    else start_time
+                ),  # noqa
                 "location": self._location,
                 "links": self._parse_links(event),
             }
 
             meetings.append(item)
         return meetings
-    
+
     def _parse_classification(self, item):
         """Parse or generate classification from allowed options."""
         item["title"] = item["title"].lower()
@@ -127,7 +153,7 @@ class IlRegionalTransitSpider(CityScrapersSpider):
         return NOT_CLASSIFIED
 
     def _parse_start(self, item):
-        start=item.replace("Upcoming:", "").replace(": "," ").strip()
+        start = item.replace("Upcoming:", "").replace(": ", " ").strip()
         return dateparser(start)
 
     def _parse_links(self, item):
