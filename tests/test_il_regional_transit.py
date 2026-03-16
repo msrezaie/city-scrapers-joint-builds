@@ -2,85 +2,120 @@ from datetime import datetime
 from os.path import dirname, join
 
 import pytest
-from city_scrapers_core.constants import NOT_CLASSIFIED
+from city_scrapers_core.constants import BOARD, PASSED, TENTATIVE
 from city_scrapers_core.utils import file_response
 from freezegun import freeze_time
 
 from city_scrapers.spiders.il_regional_transit import IlRegionalTransitSpider
 
-test_response = file_response(
-    join(dirname(__file__), "files", "il_regional_transit.html"),
-    url="https://www.rtachicago.org/about-rta/boards-and-committees/meeting-materials?year=2026",
+upcoming_response = file_response(
+    join(dirname(__file__), "files", "il_regional_transit_upcoming.html"),
+    url="https://www.rtachicago.org/about-rta/boards-and-committees/meeting-materials",
 )
-spider = IlRegionalTransitSpider()
-
-freezer = freeze_time("2026-03-02")
-freezer.start()
-
-parsed_items = [item for item in spider.parse(test_response)]
-
-freezer.stop()
 
 
-def test_tests():
-    print("Please write some tests for this spider or at least disable this one.")
-    assert False
+past_response = file_response(
+    join(dirname(__file__), "files", "il_regional_transit_past.html"),
+    url="https://www.rtachicago.org/about-rta/boards-and-committees/meeting-materials?year=2026",  # noqa
+)
 
 
-"""
-Uncomment below
-"""
-
-# def test_title():
-#     assert parsed_items[0]["title"] == "EXPECTED TITLE"
+@pytest.fixture
+def spider():
+    return IlRegionalTransitSpider()
 
 
-# def test_description():
-#     assert parsed_items[0]["description"] == "EXPECTED DESCRIPTION"
+@pytest.fixture
+def parsed_items(spider):
+    with freeze_time("2026-03-13"):
+        upcoming_section = upcoming_response.css(
+            ".bg-rtadarkgray-500.w-full.grid.grid-cols-1.p-8.mb-12.border-t-4.border-rtayellow-500"  # noqa
+        )
+        past_response.meta["upcoming_section"] = upcoming_section
+        return [item for item in spider.parse(past_response)]
 
 
-# def test_start():
-#     assert parsed_items[0]["start"] == datetime(2019, 1, 1, 0, 0)
+def test_title(parsed_items):
+    assert parsed_items[0]["title"] == "Board Meeting"
+    assert parsed_items[3]["title"] == "Pension Board of Trustees"
 
 
-# def test_end():
-#     assert parsed_items[0]["end"] == datetime(2019, 1, 1, 0, 0)
+def test_description(parsed_items):
+    assert parsed_items[0]["description"] == ""
+    assert parsed_items[3]["description"] == ""
 
 
-# def test_time_notes():
-#     assert parsed_items[0]["time_notes"] == "EXPECTED TIME NOTES"
+def test_start(parsed_items):
+    assert parsed_items[0]["start"] == datetime(2026, 3, 19, 9)
+    assert parsed_items[3]["start"] == datetime(2026, 2, 26, 0)
 
 
-# def test_id():
-#     assert parsed_items[0]["id"] == "EXPECTED ID"
+def test_end_time(parsed_items):
+    assert parsed_items[0]["end"] is None
+    assert parsed_items[3]["end"] is None
 
 
-# def test_status():
-#     assert parsed_items[0]["status"] == "EXPECTED STATUS"
+def test_time_notes(parsed_items):
+    assert (
+        parsed_items[0]["time_notes"]
+        == "Check the source page to confirm details on meeting time and location."
+    )
+    assert (
+        parsed_items[3]["time_notes"]
+        == "Check the source page to confirm details on meeting time and location."
+    )
 
 
-# def test_location():
-#     assert parsed_items[0]["location"] == {
-#         "name": "EXPECTED NAME",
-#         "address": "EXPECTED ADDRESS"
-#     }
+def test_id(parsed_items):
+    assert parsed_items[0]["id"] == "il_regional_transit/202603190900/x/board_meeting"
+    assert (
+        parsed_items[3]["id"]
+        == "il_regional_transit/202602260000/x/pension_board_of_trustees"
+    )
 
 
-# def test_source():
-#     assert parsed_items[0]["source"] == "EXPECTED URL"
+def test_status(parsed_items):
+    assert parsed_items[0]["status"] == TENTATIVE
+    assert parsed_items[3]["status"] == PASSED
 
 
-# def test_links():
-#     assert parsed_items[0]["links"] == [{
-#       "href": "EXPECTED HREF",
-#       "title": "EXPECTED TITLE"
-#     }]
+def test_links(parsed_items):
+    assert parsed_items[0]["links"] == []
+    assert parsed_items[3]["links"] == [
+        {
+            "href": "https://www.rtachicago.org/uploads/files/meeting-materials/RTA-Trustee-Meeting-Agenda-February-26-2026-draft.pdf-final.pdf",  # noqa
+            "title": "Agenda",
+        }
+    ]
 
 
-# def test_classification():
-#     assert parsed_items[0]["classification"] == NOT_CLASSIFIED
+def test_classification(parsed_items):
+    assert parsed_items[0]["classification"] == BOARD
+    assert parsed_items[3]["classification"] == BOARD
 
 
-# @pytest.mark.parametrize("item", parsed_items)
-# def test_all_day(item):
-#     assert item["all_day"] is False
+def test_all_day(parsed_items):
+    assert parsed_items[0]["all_day"] is False
+    assert parsed_items[3]["all_day"] is False
+
+
+def test_location(parsed_items):
+    assert parsed_items[0]["location"] == {
+        "name": "Board Room, 16th Floor",
+        "address": "175 W. Jackson Blvd., Chicago, IL 60604",
+    }
+    assert parsed_items[3]["location"] == {
+        "name": "RTA Headquarters",
+        "address": "175 W. Jackson Blvd., Chicago, IL 60604",
+    }
+
+
+def test_sources(parsed_items):
+    assert (
+        parsed_items[0]["source"]
+        == "https://www.rtachicago.org/about-rta/boards-and-committees/meeting-materials"  # noqa
+    )
+    assert (
+        parsed_items[3]["source"]
+        == "https://www.rtachicago.org/about-rta/boards-and-committees/meeting-materials"  # noqa
+    )

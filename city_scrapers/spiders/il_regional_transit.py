@@ -1,7 +1,12 @@
 from datetime import datetime
 
 import scrapy
-from city_scrapers_core.constants import BOARD, COMMITTEE, NOT_CLASSIFIED
+from city_scrapers_core.constants import (
+    ADVISORY_COMMITTEE,
+    BOARD,
+    COMMITTEE,
+    NOT_CLASSIFIED,
+)
 from city_scrapers_core.items import Meeting
 from city_scrapers_core.spiders import CityScrapersSpider
 from dateutil.parser import parse as dateparser
@@ -64,11 +69,11 @@ class IlRegionalTransitSpider(CityScrapersSpider):
         meetings = upcoming_meetings + archived_meetings
 
         for item in meetings:
-            temp_keys = str(item["start_time"]) + " " + item["title"]
-            if temp_keys in self._scraped_meetings:
+            seen_meeting = str(item["start_time"]) + " " + item["title"]
+            if seen_meeting in self._scraped_meetings:
                 continue
             else:
-                self._scraped_meetings.add(temp_keys)
+                self._scraped_meetings.add(seen_meeting)
 
             meeting = Meeting(
                 title=item["title"],
@@ -80,7 +85,7 @@ class IlRegionalTransitSpider(CityScrapersSpider):
                 time_notes=self._time_note,
                 location=item["location"],
                 links=item["links"],
-                source=response.url,
+                source=self.upcoming_meetings_url,
             )
 
             meeting["status"] = self._get_status(meeting)
@@ -90,40 +95,25 @@ class IlRegionalTransitSpider(CityScrapersSpider):
 
     def _parse_upcoming_meetings(self, upcoming_data):
         meetings = []
-        location = {
-            "name": "",
-            "address": "",
-        }
 
         for event in upcoming_data:
-            item_location = location.copy()
             title = event.css(
                 ".font-heading.text-xl.md\\:text-2xl.text-white.mb-2::text"
             ).get()
             start_time = event.css(".text-xl.text-rtayellow-500.mb-4::text").get()
-            location_string = event.css("p.text-white.text-sm.mb-4::text").getall()
+            location_strings = event.css("p.text-white.text-sm.mb-4::text").getall()
             links = []
-
-            item_location["name"] = (
-                location_string[0].strip() if len(location_string) > 0 else ""
-            )
-            item_location["address"] = (
-                location_string[1].strip() if len(location_string) > 1 else ""
-            )
 
             item = {
                 "title": title,
                 "start_time": self._parse_start(start_time),
-                "location": item_location,
+                "location": self._parse_location(location_strings),
                 "links": links,
             }
-
             meetings.append(item)
-
         return meetings
 
     def _parse_archived_meetings(self, archived_data):
-        """Implement parsing logic for archived meetings."""
         meetings = []
         for event in archived_data:
             title = event.css(".text-base.text-rtayellow-500.mb-4::text").get()
@@ -135,21 +125,27 @@ class IlRegionalTransitSpider(CityScrapersSpider):
                     f"{start_time} {self._start_time}"
                     if title == "Board Meeting"
                     else start_time
-                ),  # noqa
+                ),
                 "location": self._location,
                 "links": self._parse_links(event),
             }
-
             meetings.append(item)
         return meetings
 
+    def _parse_location(self, strings):
+        return {
+            "name": strings[0].strip() if len(strings) > 0 else "",
+            "address": strings[1].strip() if len(strings) > 1 else "",
+        }
+
     def _parse_classification(self, item):
-        """Parse or generate classification from allowed options."""
-        item["title"] = item["title"].lower()
-        if "board" in item["title"]:
-            return BOARD
-        if "committee" in item["title"]:
+        title = item["title"].lower()
+        if "citizen advisory" in title:
+            return ADVISORY_COMMITTEE
+        if "committee" in title:
             return COMMITTEE
+        if "board" in title:
+            return BOARD
         return NOT_CLASSIFIED
 
     def _parse_start(self, item):
@@ -157,7 +153,6 @@ class IlRegionalTransitSpider(CityScrapersSpider):
         return dateparser(start)
 
     def _parse_links(self, item):
-        """Parse or generate links."""
         links = []
         links_container = item.css(".grid.grid-cols-2 a::attr(href)").getall()
         links_title = item.css(".grid.grid-cols-2 h2::text").getall()
