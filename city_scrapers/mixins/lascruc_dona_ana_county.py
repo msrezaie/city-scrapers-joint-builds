@@ -1,23 +1,34 @@
-from city_scrapers_core.constants import NOT_CLASSIFIED
+from zoneinfo import ZoneInfo
+
+from city_scrapers_core.constants import NOT_CLASSIFIED, COMMISSION, BOARD, COMMITTEE
 from city_scrapers_core.items import Meeting
 from city_scrapers_core.spiders import CityScrapersSpider
 
+from datetime import datetime, date, timezone
 
-class SpiderFactoryTemplateMixinMeta(type):
+
+from dateutil.relativedelta import relativedelta
+
+import scrapy
+
+import re
+
+
+class LascrucDonaAnaCountySpiderMeta(type):
     """
     Metaclass that enforces required static variables on child spiders.
     """
 
     def __init__(cls, name, bases, dct):
-        if name == "SpiderFactoryTemplateMixin":
+        if name == "LascrucDonaAnaCountySpiderMixin":
             super().__init__(name, bases, dct)
             return
 
         if any(
-            getattr(base, "__name__", "") == "SpiderFactoryTemplateMixin"
+            getattr(base, "__name__", "") == "LascrucDonaAnaCountySpiderMixin"
             for base in bases
         ):
-            required_static_vars = ["agency", "name", "id"]
+            required_static_vars = ["agency", "name"]
             missing_vars = [var for var in required_static_vars if var not in dct]
 
             if missing_vars:
@@ -30,79 +41,183 @@ class SpiderFactoryTemplateMixinMeta(type):
         super().__init__(name, bases, dct)
 
 
-class SpiderFactoryTemplateMixin(
-    CityScrapersSpider, metaclass=SpiderFactoryTemplateMixinMeta
+class LascrucDonaAnaCountySpiderMixin(
+    CityScrapersSpider, metaclass=LascrucDonaAnaCountySpiderMeta
 ):
     agency = None
     timezone = "America/Denver"
+    api_base_url = "https://donaanaconm.api.civicclerk.com"
+    portal_base_url = "https://donaanaconm.portal.civicclerk.com"
 
-    meetings_api = "https://donaanaconm.api.civicclerk.com/v1/Events?$filter=startDateTime+lt+2026-03-18+and+categoryId+in+(28)&$orderby=startDateTime+desc,+eventName+desc"
+    # Default location - consistent across all WYCOKCK meetings
+    location_name = "Dona Ana County"
+    default_address = "845 N Motel Blvd, Las Cruces, NM 88007"
+
+    # Date range configuration (can be overridden by subclasses)
+    # First meeting in CivicClerk API: 2015-05-04
+    start_date_str = "2020-01-01"
+    months_ahead = 12
+
+    def start_requests(self):
+        """Generate API requests for past and upcoming events."""
+        #today = datetime.now(timezone.utc)
+        today = datetime.now(tz=ZoneInfo(self.timezone))
+
+        start_date = date.fromisoformat(self.start_date_str)
+        end_date = today + relativedelta(months=self.months_ahead)
+
+        start_date_str = start_date.isoformat()
+        end_date_str = end_date.isoformat()
+        today_str = today.isoformat()
+
+        ids_str = self.category_id
+        category_filter = f"categoryId+in+({ids_str})"
+
+        urls = [
+            # Past events (from start_date to today)
+            f"{self.api_base_url}/v1/Events?$filter=startDateTime+ge+{start_date_str}+and+startDateTime+lt+{today_str}+and+{category_filter}&$orderby=startDateTime+desc,+eventName+desc",  # noqa
+            # Upcoming events (today to end_date)
+            f"{self.api_base_url}/v1/Events?$filter=startDateTime+ge+{today_str}+and+startDateTime+le+{end_date_str}+and+{category_filter}&$orderby=startDateTime+asc,+eventName+asc",  # noqa
+        ]
+        for url in urls:
+            yield scrapy.Request(url, callback=self.parse)
 
     def parse(self, response):
         """
-        `parse` should always `yield` Meeting items.
-
-        Change the `_parse_title`, `_parse_start`, etc methods to fit your scraping
-        needs.
+        Parse JSON response from CivicClerk API and yield Meeting items.
         """
-        for item in response.css(".meetings"):
-            meeting = Meeting(
-                title=self._parse_title(item),
-                description=self._parse_description(item),
-                classification=self._parse_classification(item),
-                start=self._parse_start(item),
-                end=self._parse_end(item),
-                all_day=self._parse_all_day(item),
-                time_notes=self._parse_time_notes(item),
-                location=self._parse_location(item),
-                links=self._parse_links(item),
-                source=self._parse_source(response),
-            )
+        data = response.json()
+        events = data.get("value", [])
 
-            meeting["status"] = self._get_status(meeting)
+        for raw_event in events:
+            event_id = raw_event.get("id")
+            if not event_id:
+                continue
+
+            raw_title = raw_event.get("eventName") or self.agency
+            title = self._parse_title(raw_title)
+            meeting = Meeting(
+                title=title,
+                description=raw_event.get("eventDescription") or "",
+                classification=self._parse_classification(f"{title} {self.agency}"),
+                start=self._parse_start(raw_event),
+                end=self._parse_end(raw_event),
+                all_day=False,
+                time_notes="",
+                location=self._parse_location(raw_event),
+                links=self._parse_links(raw_event),
+                source=f"{self.portal_base_url}/event/{event_id}",
+            )
+            meeting["status"] = self._get_status(meeting, text=raw_title)
             meeting["id"] = self._get_id(meeting)
 
             yield meeting
 
-    def _parse_title(self, item):
-        """Parse or generate meeting title."""
-        return ""
+        # Handle pagination
+        next_link = data.get("@odata.nextLink")
+        if next_link:
+            yield scrapy.Request(next_link, callback=self.parse)
 
-    def _parse_description(self, item):
-        """Parse or generate meeting description."""
-        return ""
-
-    def _parse_classification(self, item):
-        """Parse or generate classification from allowed options."""
-        return NOT_CLASSIFIED
-
-    def _parse_start(self, item):
-        """Parse start datetime as a naive datetime object."""
-        return None
-
-    def _parse_end(self, item):
-        """Parse end datetime as a naive datetime object. Added by pipeline if None"""
-        return None
-
-    def _parse_time_notes(self, item):
-        """Parse any additional notes on the timing of the meeting"""
-        return ""
-
-    def _parse_all_day(self, item):
-        """Parse or generate all-day status. Defaults to False."""
-        return False
-
-    def _parse_location(self, item):
-        """Parse or generate location."""
-        return {
-            "address": "",
-            "name": "",
+    def _parse_classification(self, title):
+        """
+        Parse classification from meeting title and agency name.
+        """
+        classification_map = {
+            "commission": COMMISSION,
+            "board": BOARD,
+            "committee": COMMITTEE,
         }
 
-    def _parse_links(self, item):
-        """Parse or generate links."""
-        return [{"href": "", "title": ""}]
+        for keyword, classification in classification_map.items():
+            if keyword in title.lower():
+                return classification
 
-    def _parse_source(self, response):
-        """Parse or generate source."""
-        return response.url
+        return NOT_CLASSIFIED
+
+    def _parse_title(self, raw_title):
+        """
+        Parse or generate meeting title with robust normalization.
+
+        Removes:
+        - Any trailing parenthetical content: "Title (anything)" -> "Title"
+        - Leading dates: "8.15.24 Title" -> "Title"
+        - Trailing dates: "Title 01.28.26" -> "Title"
+        - Extra whitespace
+        """
+        title = raw_title
+        # Remove any parenthetical content at end of string
+        title = re.sub(r"\s*\([^)]*\)\s*$", "", title)
+        # Remove leading dates (8.15.24, 10.12.23)
+        title = re.sub(r"^\d{1,2}[./]\d{1,2}[./]\d{2,4}\s+", "", title)
+        # Remove trailing dates in various formats (01.28.26, 01/28/2026, etc.)
+        title = re.sub(r"\s+\d{1,2}[./]\d{1,2}[./]\d{2,4}\s*$", "", title)
+        # Collapse multiple spaces to single space
+        title = re.sub(r"\s+", " ", title).strip()
+        return title
+
+    def _parse_start(self, raw_event):
+        """Parse start datetime as a naive datetime object."""
+        start_str = raw_event.get("startDateTime")
+        return self._parse_dt(start_str)
+
+    def _parse_end(self, raw_event):
+        """Parse end datetime as a naive datetime object. Added by pipeline if None"""
+        end_str = raw_event.get("endDateTime")
+        return self._parse_dt(end_str)
+
+    def _parse_location(self, raw_event):
+        """Parse or generate location."""
+        event_location = raw_event.get("eventLocation") or {}
+
+        address_parts = [
+            event_location.get("address1") or "",
+            event_location.get("address2") or "",
+            ", ".join(
+                part
+                for part in [
+                    event_location.get("city"),
+                    event_location.get("state"),
+                    event_location.get("zipCode"),
+                ]
+                if part
+            ),
+        ]
+        address = " ".join(part for part in address_parts if part).strip()
+
+        # Default address if none provided in the event
+        if not address:
+            address = self.default_address
+
+        return {
+            "name": self.location_name,
+            "address": address,
+        }
+
+    def _parse_links(self, raw_event):
+        """Parse or generate links."""
+        event_id = raw_event.get("id")
+        links = []
+        for f in raw_event.get("publishedFiles", []):
+            file_id = f.get("fileId")
+            if not file_id or not event_id:
+                continue
+            links.append(
+                {
+                    "title": f.get("type") or "Document",
+                    "href": f"{self.portal_base_url}/event/{event_id}/files/agenda/{file_id}",  # noqa
+                }
+            )
+        return links
+
+    def _parse_dt(self, dt_str):
+        """Parse an ISO datetime string into a naive datetime object."""
+        if not dt_str:
+            return None
+        # Handle ISO format like '2025-11-19T11:30:00Z'
+        dt_str = dt_str.replace("Z", "+00:00")
+        try:
+            dt = datetime.fromisoformat(dt_str)
+            # Return naive datetime (strip timezone)
+            return dt.replace(tzinfo=None)
+        except ValueError:
+            return None

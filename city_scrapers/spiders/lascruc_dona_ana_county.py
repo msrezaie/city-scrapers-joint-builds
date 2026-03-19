@@ -1,16 +1,22 @@
-from city_scrapers.mixins.lascruc_dona_ana_county import SpiderFactoryTemplateMixin
+from city_scrapers.mixins.lascruc_dona_ana_county import LascrucDonaAnaCountySpiderMixin
 
 
 # list of agencies
-# "BOCC Agendas" id = 28
+# "BOCC Agendas" id = 26
 # "Planning and Zoning" id = 27
 # "Labor Management Relations" = id 30
 # "Airport Advisory Board" id = 31
 # "Development Review Committee" id = 29
-# "County ADA Advisory Board" id = 26
+# "County ADA Advisory Board" id =
 # "Compliance Office" id = https://www.donaana.gov/government/agendas/compliance_office.php
+
 spider_configs = [
-    {}
+    {
+        "class_name": "LascrucDonaAnaBoardOfCountyCommissionersSpider",
+        "name": "lascruc_dona_ana_county_board_of_county_commissioners",
+        "agency": "Board of County Commissioners",
+        "category_id": 26,
+    },
 ]
 
 def create_spiders():
@@ -31,7 +37,7 @@ def create_spiders():
             # Dynamically create the spider class
             spider_class = type(
                 class_name,
-                (SpiderFactoryTemplateMixin,),
+                (LascrucDonaAnaCountySpiderMixin,),
                 attrs,
             )
 
