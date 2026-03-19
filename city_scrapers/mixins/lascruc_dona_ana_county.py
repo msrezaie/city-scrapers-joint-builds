@@ -35,7 +35,8 @@ class SpiderFactoryTemplateMixin(
 ):
     agency = None
     timezone = "America/Denver"
-    start_urls = [""]
+
+    meetings_api = "https://donaanaconm.api.civicclerk.com/v1/Events?$filter=startDateTime+lt+2026-03-18+and+categoryId+in+(28)&$orderby=startDateTime+desc,+eventName+desc"
 
     def parse(self, response):
         """

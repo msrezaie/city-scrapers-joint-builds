@@ -1,5 +1,14 @@
 from city_scrapers.mixins.lascruc_dona_ana_county import SpiderFactoryTemplateMixin
 
+
+# list of agencies
+# "BOCC Agendas" id = 28
+# "Planning and Zoning" id = 27
+# "Labor Management Relations" = id 30
+# "Airport Advisory Board" id = 31
+# "Development Review Committee" id = 29
+# "County ADA Advisory Board" id = 26
+# "Compliance Office" id = https://www.donaana.gov/government/agendas/compliance_office.php
 spider_configs = [
     {}
 ]
