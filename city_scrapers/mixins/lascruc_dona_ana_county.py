@@ -1,17 +1,12 @@
+import re
+from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
-from city_scrapers_core.constants import NOT_CLASSIFIED, COMMISSION, BOARD, COMMITTEE
+import scrapy
+from city_scrapers_core.constants import BOARD, COMMISSION, COMMITTEE, NOT_CLASSIFIED
 from city_scrapers_core.items import Meeting
 from city_scrapers_core.spiders import CityScrapersSpider
-
-from datetime import datetime, date, timezone
-
-
 from dateutil.relativedelta import relativedelta
-
-import scrapy
-
-import re
 
 
 class LascrucDonaAnaCountySpiderMeta(type):
@@ -48,6 +43,9 @@ class LascrucDonaAnaCountySpiderMixin(
     timezone = "America/Denver"
     api_base_url = "https://donaanaconm.api.civicclerk.com"
     portal_base_url = "https://donaanaconm.portal.civicclerk.com"
+    custom_settings = {
+        "ROBOTSTXT_OBEY": False,
+    }
 
     # Default location - consistent across all WYCOKCK meetings
     location_name = "Dona Ana County"
@@ -60,27 +58,38 @@ class LascrucDonaAnaCountySpiderMixin(
 
     def start_requests(self):
         """Generate API requests for past and upcoming events."""
-        #today = datetime.now(timezone.utc)
-        today = datetime.now(tz=ZoneInfo(self.timezone))
+        if hasattr(self, "compliance_url"):
+            yield scrapy.Request(self.compliance_url, callback=self.parse_compliance)
+            # print(f"Compliance URL found for {self.name}: {self.compliance_url}")
+            return
+        else:
+            # yield scrapy.Request(self.compliance_url, callback=self.parse_compliance)
+            # today = datetime.now(timezone.utc)
+            today = datetime.now(tz=ZoneInfo(self.timezone))
 
-        start_date = date.fromisoformat(self.start_date_str)
-        end_date = today + relativedelta(months=self.months_ahead)
+            start_date = date.fromisoformat(self.start_date_str)
+            end_date = today + relativedelta(months=self.months_ahead)
 
-        start_date_str = start_date.isoformat()
-        end_date_str = end_date.isoformat()
-        today_str = today.isoformat()
+            start_date_str = start_date.isoformat()
+            end_date_str = end_date.isoformat()
+            today_str = today.isoformat()
 
-        ids_str = self.category_id
-        category_filter = f"categoryId+in+({ids_str})"
+            ids_str = self.category_id
+            category_filter = f"categoryId+in+({ids_str})"
 
-        urls = [
-            # Past events (from start_date to today)
-            f"{self.api_base_url}/v1/Events?$filter=startDateTime+ge+{start_date_str}+and+startDateTime+lt+{today_str}+and+{category_filter}&$orderby=startDateTime+desc,+eventName+desc",  # noqa
-            # Upcoming events (today to end_date)
-            f"{self.api_base_url}/v1/Events?$filter=startDateTime+ge+{today_str}+and+startDateTime+le+{end_date_str}+and+{category_filter}&$orderby=startDateTime+asc,+eventName+asc",  # noqa
-        ]
-        for url in urls:
-            yield scrapy.Request(url, callback=self.parse)
+            urls = [
+                # Past events (from start_date to today)
+                f"{self.api_base_url}/v1/Events?$filter=startDateTime+ge+{start_date_str}+and+startDateTime+lt+{today_str}+and+{category_filter}&$orderby=startDateTime+desc,+eventName+desc",  # noqa
+                # Upcoming events (today to end_date)
+                f"{self.api_base_url}/v1/Events?$filter=startDateTime+ge+{today_str}+and+startDateTime+le+{end_date_str}+and+{category_filter}&$orderby=startDateTime+asc,+eventName+asc",  # noqa
+            ]
+            for url in urls:
+                yield scrapy.Request(url, callback=self.parse)
+
+    def parse_compliance(self, response):
+        compliance_meeting = response.css("ul.file-group li a::attr(href)").get()
+        print("HERE", compliance_meeting)
+        pass
 
     def parse(self, response):
         """
@@ -145,14 +154,24 @@ class LascrucDonaAnaCountySpiderMixin(
         - Extra whitespace
         """
         title = raw_title
-        # Remove any parenthetical content at end of string
-        title = re.sub(r"\s*\([^)]*\)\s*$", "", title)
-        # Remove leading dates (8.15.24, 10.12.23)
-        title = re.sub(r"^\d{1,2}[./]\d{1,2}[./]\d{2,4}\s+", "", title)
-        # Remove trailing dates in various formats (01.28.26, 01/28/2026, etc.)
-        title = re.sub(r"\s+\d{1,2}[./]\d{1,2}[./]\d{2,4}\s*$", "", title)
-        # Collapse multiple spaces to single space
-        title = re.sub(r"\s+", " ", title).strip()
+        # 10/07/2021
+        # (6/25/21)
+        # March 10, 2026
+        # 13 Oct 22
+        # remove ONLY from the start:
+        # start_date_pattern = r'^\s*\(?\s*(?:\d{1,2}\s*/\s*\d{1,2}\s*/\s*\d{2,4}|\d{1,2}\s+[A-Za-z]{3,9}\s+\d{2,4})\s*\)?\s*' # noqa
+
+        end_date_pattern = r"\s*(?:\d{1,2}\s*/\s*\d{1,2}\s*/\s*\d{2,4}|\d{1,2}\s+[A-Za-z]{3,9}\s+\d{2,4}|[A-Za-z]{3,9}\s+\d{1,2},\s+\d{2,4})\s*$"  # noqa
+        # title = re.sub(start_date_pattern, "", title)
+        title = re.sub(end_date_pattern, "", title)
+        # # Remove any parenthetical content at end of string
+        # title = re.sub(r"\s*\([^)]*\)\s*$", "", title)
+        # # Remove leading dates (8.15.24, 10.12.23)
+        # title = re.sub(r"^\d{1,2}[//]\d{1,2}[//]\d{2,4}\s+", "", title)
+        # # Remove trailing dates in various formats (01.28.26, 01/28/2026, etc.)
+        # title = re.sub(r"\s+\d{1,2}[./]\d{1,2}[./]\d{2,4}\s*$", "", title)
+        # # Collapse multiple spaces to single space
+        # title = re.sub(r"\s+", " ", title).strip()
         return title
 
     def _parse_start(self, raw_event):
