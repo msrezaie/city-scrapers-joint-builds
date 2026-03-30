@@ -58,9 +58,9 @@ class LascrucDonaAnaCountySpiderMixin(
 
     def start_requests(self):
         """Generate API requests for past and upcoming events."""
-        if hasattr(self, "compliance_url"):
-            yield scrapy.Request(self.compliance_url, callback=self.parse_compliance)
-            # print(f"Compliance URL found for {self.name}: {self.compliance_url}")
+        compliance_url = getattr(self, "compliance_url", None)
+        if compliance_url:
+            yield scrapy.Request(compliance_url, callback=self.parse_compliance)
             return
         else:
             # yield scrapy.Request(self.compliance_url, callback=self.parse_compliance)
@@ -87,9 +87,34 @@ class LascrucDonaAnaCountySpiderMixin(
                 yield scrapy.Request(url, callback=self.parse)
 
     def parse_compliance(self, response):
-        compliance_meeting = response.css("ul.file-group li a::attr(href)").get()
-        print("HERE", compliance_meeting)
-        pass
+        """Parse HTML response from Dona Ana County compliance office page."""
+        entries = response.css("li.doc-center-entry")
+
+        for entry in entries:
+            date_text = entry.css("span.agenda-date::text").get("").strip()
+            raw_title = entry.css("span.agenda-name::text").get("").strip()
+
+            start = self._parse_compliance_date(date_text)
+            if not start:
+                continue
+
+            title = self._parse_title(raw_title) if raw_title else self.agency
+
+            links = self._parse_compliance_links(entry, response)
+
+            yield self._build_meeting(
+                title=title,
+                description="",
+                start=start,
+                end=None,
+                location={
+                    "name": self.location_name,
+                    "address": self.default_address,
+                },
+                links=links,
+                source=self.compliance_url,
+                raw_title=raw_title,
+            )
 
     def parse(self, response):
         """
@@ -104,28 +129,52 @@ class LascrucDonaAnaCountySpiderMixin(
                 continue
 
             raw_title = raw_event.get("eventName") or self.agency
-            title = self._parse_title(raw_title)
-            meeting = Meeting(
-                title=title,
+
+            yield self._build_meeting(
+                title=self._parse_title(raw_title),
                 description=raw_event.get("eventDescription") or "",
-                classification=self._parse_classification(f"{title} {self.agency}"),
                 start=self._parse_start(raw_event),
                 end=self._parse_end(raw_event),
-                all_day=False,
-                time_notes="",
                 location=self._parse_location(raw_event),
                 links=self._parse_links(raw_event),
                 source=f"{self.portal_base_url}/event/{event_id}",
+                raw_title=raw_title,
+                category_name=raw_event.get("categoryName"),
             )
-            meeting["status"] = self._get_status(meeting, text=raw_title)
-            meeting["id"] = self._get_id(meeting)
-
-            yield meeting
 
         # Handle pagination
         next_link = data.get("@odata.nextLink")
         if next_link:
             yield scrapy.Request(next_link, callback=self.parse)
+
+    def _build_meeting(
+        self,
+        title,
+        description,
+        start,
+        end,
+        location,
+        links,
+        source,
+        raw_title,
+        category_name=None,  # noqa
+    ):
+        classification_text = f"{title} {category_name or self.agency}"
+        meeting = Meeting(
+            title=title,
+            description=description,
+            classification=self._parse_classification(classification_text),
+            start=start,
+            end=end,
+            all_day=False,
+            time_notes="",
+            location=location,
+            links=links,
+            source=source,
+        )
+        meeting["status"] = self._get_status(meeting, text=raw_title)
+        meeting["id"] = self._get_id(meeting)
+        return meeting
 
     def _parse_classification(self, title):
         """
@@ -144,35 +193,35 @@ class LascrucDonaAnaCountySpiderMixin(
         return NOT_CLASSIFIED
 
     def _parse_title(self, raw_title):
-        """
-        Parse or generate meeting title with robust normalization.
+        if not raw_title:
+            self.logger.warning(
+                "Empty or missing title, falling back to agency: %s", self.agency
+            )  # noqa
+            return self.agency
 
-        Removes:
-        - Any trailing parenthetical content: "Title (anything)" -> "Title"
-        - Leading dates: "8.15.24 Title" -> "Title"
-        - Trailing dates: "Title 01.28.26" -> "Title"
-        - Extra whitespace
-        """
-        title = raw_title
-        # 10/07/2021
-        # (6/25/21)
-        # March 10, 2026
-        # 13 Oct 22
-        # remove ONLY from the start:
-        # start_date_pattern = r'^\s*\(?\s*(?:\d{1,2}\s*/\s*\d{1,2}\s*/\s*\d{2,4}|\d{1,2}\s+[A-Za-z]{3,9}\s+\d{2,4})\s*\)?\s*' # noqa
+        title = raw_title.strip()
 
-        end_date_pattern = r"\s*(?:\d{1,2}\s*/\s*\d{1,2}\s*/\s*\d{2,4}|\d{1,2}\s+[A-Za-z]{3,9}\s+\d{2,4}|[A-Za-z]{3,9}\s+\d{1,2},\s+\d{2,4})\s*$"  # noqa
-        # title = re.sub(start_date_pattern, "", title)
-        title = re.sub(end_date_pattern, "", title)
-        # # Remove any parenthetical content at end of string
-        # title = re.sub(r"\s*\([^)]*\)\s*$", "", title)
-        # # Remove leading dates (8.15.24, 10.12.23)
-        # title = re.sub(r"^\d{1,2}[//]\d{1,2}[//]\d{2,4}\s+", "", title)
-        # # Remove trailing dates in various formats (01.28.26, 01/28/2026, etc.)
-        # title = re.sub(r"\s+\d{1,2}[./]\d{1,2}[./]\d{2,4}\s*$", "", title)
-        # # Collapse multiple spaces to single space
-        # title = re.sub(r"\s+", " ", title).strip()
-        return title
+        trailing_date_pattern = (
+            r"\s*[,.]?\s*(?:"
+            r"\d{1,2}[./]\d{1,2}[./]\d{2,4}|"
+            r"\d{1,2}\s+[A-Za-z]{3,9}\s+\d{2,4}|"
+            r"[A-Za-z]{3,9}\s*\d{1,2}\s*[.,]?\s*\d{2,4}"
+            r")\s*$"
+        )
+
+        title = re.sub(trailing_date_pattern, "", title)
+        title = re.sub(r"[,.\s]+$", "", title)
+        title = re.sub(r"\s+", " ", title).strip()
+
+        if not title:
+            self.logger.warning(
+                "Title reduced to empty after stripping "
+                "dates from '%s', falling back to "
+                "agency: %s",
+                raw_title,
+                self.agency,
+            )
+        return title or self.agency
 
     def _parse_start(self, raw_event):
         """Parse start datetime as a naive datetime object."""
@@ -213,19 +262,61 @@ class LascrucDonaAnaCountySpiderMixin(
         }
 
     def _parse_links(self, raw_event):
-        """Parse or generate links."""
+        """Parse published files into meeting links."""
         event_id = raw_event.get("id")
+        if not event_id:
+            return []
+
         links = []
-        for f in raw_event.get("publishedFiles", []):
-            file_id = f.get("fileId")
-            if not file_id or not event_id:
+        seen = set()
+
+        for file_info in raw_event.get("publishedFiles", []):
+            file_id = file_info.get("fileId")
+            if not file_id:
                 continue
-            links.append(
-                {
-                    "title": f.get("type") or "Document",
-                    "href": f"{self.portal_base_url}/event/{event_id}/files/agenda/{file_id}",  # noqa
-                }
-            )
+
+            link = {
+                "title": (file_info.get("type") or "Document").strip(),
+                "href": f"{self.portal_base_url}/event/{event_id}/files/agenda/{file_id}",  # noqa
+            }
+
+            key = (link["title"], link["href"])
+            if key in seen:
+                continue
+            seen.add(key)
+            links.append(link)
+
+        return links
+
+    def _parse_compliance_date(self, date_text):
+        """Parse a date string like '11/22/2024' into a naive datetime."""
+        if not date_text:
+            return None
+        for fmt in ("%m/%d/%Y", "%m/%d/%y"):
+            try:
+                return datetime.strptime(date_text, fmt).replace(hour=10)
+            except ValueError:
+                continue
+        return None
+
+    def _parse_compliance_links(self, entry, response):
+        """Extract agenda, minutes, packet, and video links from a compliance entry."""
+        links = []
+        link_columns = [
+            ("td.agenda_doc a", "Agenda"),
+            ("td.packet_doc a", "Packet"),
+            ("td.minutes_doc a", "Minutes"),
+            ("td.video_url a", "Video"),
+        ]
+        for selector, title in link_columns:
+            link_el = entry.css(selector)
+            href = link_el.attrib.get("href", "").strip() if link_el else ""
+            if href:
+                if not href.startswith(("http://", "https://", "/")):
+                    href = "/" + href
+                href = href.replace(" ", "%20")
+                href = response.urljoin(href)
+                links.append({"title": title, "href": href})
         return links
 
     def _parse_dt(self, dt_str):
