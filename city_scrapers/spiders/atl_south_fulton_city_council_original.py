@@ -5,7 +5,7 @@ from city_scrapers_core.spiders import CityScrapersSpider
 
 
 class AtlSouthFultonCityCouncilSpider(CityScrapersSpider):
-    name = "atl_south_fulton_city_council"
+    name = "atl_south_fulton_city_council_original"
     agency = "South Fulton City Council"
     timezone = "America/New_York"
     start_urls = [

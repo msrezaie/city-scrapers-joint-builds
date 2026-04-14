@@ -55,6 +55,10 @@ class AtlSouthFultonCityCouncilSpiderMixin(
     start_date_str = "2019-01-01"
     months_ahead = 12
 
+    custom_settings ={
+        "ROBOTSTXT_OBEY": False,
+    }
+
     def start_requests(self):
         """Generate API requests for past and upcoming events."""
 
@@ -64,8 +68,8 @@ class AtlSouthFultonCityCouncilSpiderMixin(
         end_date = today + relativedelta(months=self.months_ahead)
 
         start_date_str = start_date.isoformat()
-        end_date_str = end_date.isoformat()
-        today_str = today.isoformat()
+        end_date_str = end_date.strftime("%Y-%m-%d")
+        today_str = today.strftime("%Y-%m-%d")
 
         ids_str = self.category_id
         category_filter = f"categoryId+in+({ids_str})"
