@@ -3,7 +3,7 @@ from dateutil.parser import parser as dateparser
 from datetime import datetime, date
 from dateutil.relativedelta import relativedelta
 from zoneinfo import ZoneInfo
-from city_scrapers_core.constants import COMMISSION, BOARD, COMMITTEE, NOT_CLASSIFIED
+from city_scrapers_core.constants import CITY_COUNCIL, COMMISSION, BOARD, COMMITTEE, NOT_CLASSIFIED
 import scrapy
 import re
 from city_scrapers_core.items import Meeting
@@ -73,12 +73,6 @@ class AtlSouthFultonCityCouncilSpiderMixin(
 
         ids_str = self.category_id
         category_filter = f"categoryId+in+({ids_str})"
-
-    #   https://southfultonga.api.civicclerk.com/v1/Events?
-    # $filter=
-    # %20startDateTime%20lt%202026-04-14&
-    # $orderby=startDateTime%20desc%2C%20eventName%20desc&
-    # $skiptoken=startDateTime-2026-01-13T12%3A00%3A00Z,eventName-%27One+Time+Event%27,id-1734
         
         urls = [
             # Past events (from start_date to today)
@@ -164,7 +158,7 @@ class AtlSouthFultonCityCouncilSpiderMixin(
             if keyword in title.lower():
                 return classification
 
-        return NOT_CLASSIFIED
+        return CITY_COUNCIL
 
     def _parse_title(self, raw_title):
         if not raw_title:
@@ -270,10 +264,11 @@ class AtlSouthFultonCityCouncilSpiderMixin(
         """
         if not dt_str:
             return None
-        dt_str = dt_str.replace("Z", "+00:00")
+        dt_str = dt_str.replace("Z", "")
         try:
             dt = datetime.fromisoformat(dt_str)
             # Return naive datetime (strip timezone)
             return dt.replace(tzinfo=None)
         except ValueError:
+            self.logger.warning("Invalid datetime: %s", dt_str)
             return None
