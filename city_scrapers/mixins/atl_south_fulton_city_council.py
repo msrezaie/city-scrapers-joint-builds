@@ -1,9 +1,8 @@
 from city_scrapers_core.spiders import CityScrapersSpider
-from dateutil.parser import parser as dateparser
 from datetime import datetime, date
 from dateutil.relativedelta import relativedelta
 from zoneinfo import ZoneInfo
-from city_scrapers_core.constants import CITY_COUNCIL, COMMISSION, BOARD, COMMITTEE, NOT_CLASSIFIED
+from city_scrapers_core.constants import CITY_COUNCIL, COMMISSION, BOARD, COMMITTEE
 import scrapy
 import re
 from city_scrapers_core.items import Meeting
