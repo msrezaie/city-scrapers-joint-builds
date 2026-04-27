@@ -12,50 +12,63 @@ class AtlClaytonCoBocSpider(CityScrapersSpider):
     agency = "Clayton County Board of Commissioners"
     timezone = "America/Chicago"
     source_url = "https://claytoncountyga.primegov.com/public/portal?fromiframe=true"
-    api_url = "https://claytoncountyga.primegov.com/api/v2/PublicPortal/ListArchivedMeetings?year={year}"
+    archived_url = "https://claytoncountyga.primegov.com/api/v2/PublicPortal/ListArchivedMeetings?year={year}"
+    upcoming_url = "https://claytoncountyga.primegov.com/api/v2/PublicPortal/ListUpcomingMeetings"
     attachment_url = "https://claytoncountyga.primegov.com/Public/CompiledDocument?meetingTemplateId={template_id}&compileOutputType=1"
     html_url = "https://claytoncountyga.primegov.com/Portal/Meeting?meetingTemplateId={template_id}"
+    
+    """
+    No address was found in the source website, so it is currently left blank.
+    """
+    meeting_address = {
+        "address": "",
+        "name": "",
+    }
+
+    time_notes = "For meeting's details, please refer to the source URL."
 
     custom_settings = {
         "ROBOTSTXT_OBEY": False,
     }
 
     def start_requests(self):
+        yield scrapy.Request(
+            url=self.upcoming_url,
+            callback=self.archived_requests
+        )
+        
+    def archived_requests(self, response):
         current_year = datetime.now(ZoneInfo(self.timezone)).year
         for year in range(current_year - 3, current_year + 1):
             yield scrapy.Request(
-                url=self.api_url.format(year=year),
-                callback=self.parse,
+                    url=self.archived_url.format(year=year),
+                    callback=self.parse,
+                    meta={"upcoming_meetings": response},
                 )
+        
     def parse(self, response):
-        response = response.json()
-        """
-        `parse` should always `yield` Meeting items.
+        upcoming_meetings = response.meta.get('upcoming_meetings', [])
+        response = response.json() + upcoming_meetings.json()
 
-        Change the `_parse_title`, `_parse_start`, etc methods to fit your scraping
-        needs.
-        """
         for item in response:
+            title = item.get("title", "")
             meeting = Meeting(
-                title=self._parse_title(item),
+                title=title,
                 description="",
                 classification=BOARD,
                 start=self._parse_start(item),
                 end=None,
                 all_day=False,
-                time_notes="",
-                location=self._parse_location(item),
+                time_notes=self.time_notes,
+                location=self.meeting_address,
                 links=self._parse_links(item),
                 source=self.source_url,
             )
 
             meeting["status"] = self._get_status(meeting)
             meeting["id"] = self._get_id(meeting)
-            yield meeting
-    def _parse_title(self, item):
-        """Parse or generate meeting title."""
 
-        return item.get("title", "")
+            yield meeting
 
     def _parse_start(self, item):
         """Parse start datetime as a naive datetime object."""
@@ -67,22 +80,12 @@ class AtlClaytonCoBocSpider(CityScrapersSpider):
             parsed_start = dateparser(dt_str)
         elif date:
             parsed_start = dateparser(date)
-
         return parsed_start
 
-    def _parse_location(self, item):
-        """Parse or generate location."""
-        return {
-            "address": "",
-            "name": "",
-        }
-
     def _parse_links(self, item):
-        """Parse or generate links."""
         links = []
-
         parsed_links = item.get("documentList", [])
-        parsed_video_links = item.get("videoUrl", "")
+        parsed_video_link = item.get("videoUrl", "")
 
         for link in parsed_links:
             if "HTML Agenda" in link.get("templateName", ""):
@@ -96,12 +99,10 @@ class AtlClaytonCoBocSpider(CityScrapersSpider):
                
             })
 
-        if parsed_video_links:
-
+        if parsed_video_link:
             links.append({
                 "title": "Video",
-                "href": "https:" + parsed_video_links if not "https:" in parsed_video_links else parsed_video_links,
+                "href": "http:" + parsed_video_link if parsed_video_link.startswith("//") else parsed_video_link,
                 
             })
         return links
-
