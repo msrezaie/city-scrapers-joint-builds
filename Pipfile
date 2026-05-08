@@ -11,6 +11,7 @@ scrapy-wayback-middleware = "*"
 python-dateutil = "*"
 icalendar = "*"
 azure-storage-blob = "*"
+tzdata = "*"
 
 [dev-packages]
 freezegun = "*"
