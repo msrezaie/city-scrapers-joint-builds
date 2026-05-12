@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip show *)",
+      "Bash(python3 -c \"import city_scrapers_core; print\\(city_scrapers_core.__file__\\)\")",
+      "Bash(pipenv run *)",
+      "Bash(find /Users/xox/.local/share/virtualenvs/city-scrapers-kancit-9hwyj0oq/lib/python3.12/site-packages/city_scrapers_core -name \"*.py\" | sort)",
+      "Read(//Users/xox/.local/share/virtualenvs/city-scrapers-kancit-9hwyj0oq/lib/python3.12/site-packages/city_scrapers_core/**)"
+    ]
+  }
+}

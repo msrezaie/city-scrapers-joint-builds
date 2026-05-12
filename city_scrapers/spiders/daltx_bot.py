@@ -51,7 +51,11 @@ class DaltxBotSpider(CityScrapersSpider):
 
     def _construct_meeting(self, response):
         item = response.meta["item"]
+        # print(f"Processing meeting:", item)
+        # print(f"Response item:", response.text)
+
         start, end, all_day = self._parse_datetime(item)
+        location, time_notes= self._parse_location(response, all_day)
         meeting = Meeting(
             title=self._parse_title(item),
             description=self._parse_description(item),
@@ -59,10 +63,11 @@ class DaltxBotSpider(CityScrapersSpider):
             start=start,
             end=end,
             all_day=all_day,
-            time_notes="",
-            location=self._parse_location(item),
-            links=self._parse_links(item),
+            time_notes=time_notes,
+            location=location,
+            links=self._parse_links(response),
             source=response.url,
+
         )
 
         meeting["status"] = self._get_status(meeting)
@@ -93,13 +98,23 @@ class DaltxBotSpider(CityScrapersSpider):
 
         return start_dt, end_dt, False
 
-    def _parse_location(self, item):
-        """Parse or generate location."""
-        return {
-            "address": "",
-            "name": "",
-        }
+    def _parse_location(self, response, all_day):
+        item =response.css('.accordion-body ul li::text').getall()
+        if all_day:
+            address ={"address": "","name": ""}
+            time_notes= item[2].strip() if item else ""
+            return address, time_notes
+        
+        if item and len(item) > 1:
+            return{
+                "address": item[2].strip(),
+                "name": item[1].strip(),
+            }, ""
+        else:
+            return{
+                "address": "",
+                "name": "",
+            }, ""
 
     def _parse_links(self, item):
-        """Parse or generate links."""
         return [{"href": "", "title": ""}]
